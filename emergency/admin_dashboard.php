@@ -36,6 +36,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_resource'])) {
     $stmt->close();
 }
 
+// Handle Update Resource
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_resource'])) {
+    $id = intval($_POST['id']);
+    $resource = $_POST['resource'];
+    $quantity = $_POST['quantity'];
+    $location = $_POST['location'];
+
+    $stmt = $conn->prepare("UPDATE resources SET resource = ?, quantity = ?, location = ? WHERE id = ?");
+    $stmt->bind_param("sisi", $resource, $quantity, $location, $id);
+    if ($stmt->execute()) {
+        $message = "Resource updated successfully!";
+    } else {
+        $error = "Failed to update resource: " . $conn->error;
+    }
+    $stmt->close();
+}
+
 // Handle Delete Resource
 if (isset($_GET['delete'])) {
     $id = intval($_GET['delete']);
@@ -49,17 +66,91 @@ if (isset($_GET['delete'])) {
     $stmt->close();
 }
 
-// Fetch resources from the database
+// Handle Add Car
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_car'])) {
+    $car_model = $_POST['car_model'];
+    $license_plate = $_POST['license_plate'];
+    $status = $_POST['status'];
+
+    $stmt = $conn->prepare("INSERT INTO cars (car_model, license_plate, status) VALUES (?, ?, ?)");
+    $stmt->bind_param("sss", $car_model, $license_plate, $status);
+    if ($stmt->execute()) {
+        $message = "Car added successfully!";
+    } else {
+        $error = "Failed to add car: " . $conn->error;
+    }
+    $stmt->close();
+}
+
+// Handle Update Car
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_car'])) {
+    $id = intval($_POST['id']);
+    $car_model = $_POST['car_model'];
+    $license_plate = $_POST['license_plate'];
+    $status = $_POST['status'];
+
+    $stmt = $conn->prepare("UPDATE cars SET car_model = ?, license_plate = ?, status = ? WHERE id = ?");
+    $stmt->bind_param("sssi", $car_model, $license_plate, $status, $id);
+    if ($stmt->execute()) {
+        $message = "Car updated successfully!";
+    } else {
+        $error = "Failed to update car: " . $conn->error;
+    }
+    $stmt->close();
+}
+
+// Handle Delete Car
+if (isset($_GET['delete_car'])) {
+    $id = intval($_GET['delete_car']);
+    $stmt = $conn->prepare("DELETE FROM cars WHERE id = ?");
+    $stmt->bind_param("i", $id);
+    if ($stmt->execute()) {
+        $message = "Car deleted successfully!";
+    } else {
+        $error = "Failed to delete car: " . $conn->error;
+    }
+    $stmt->close();
+}
+
+// Fetch resources with pagination
+$limit = 10; // Number of records per page
+$page = isset($_GET['page']) ? intval($_GET['page']) : 1;
+$offset = ($page - 1) * $limit;
+
 $searchQuery = "";
 if (isset($_GET['search']) && !empty($_GET['search'])) {
     $searchQuery = $_GET['search'];
-    $sql = "SELECT * FROM resources WHERE resource LIKE '%$searchQuery%' OR location LIKE '%$searchQuery%'";
+    $sql = "SELECT * FROM resources WHERE resource LIKE '%$searchQuery%' OR location LIKE '%$searchQuery%' LIMIT $limit OFFSET $offset";
+    $totalSQL = "SELECT COUNT(*) as total FROM resources WHERE resource LIKE '%$searchQuery%' OR location LIKE '%$searchQuery%'";
 } else {
-    $sql = "SELECT * FROM resources";
+    $sql = "SELECT * FROM resources LIMIT $limit OFFSET $offset";
+    $totalSQL = "SELECT COUNT(*) as total FROM resources";
 }
-$result = $conn->query($sql);
 
-// Close connection at the end of the script
+$result = $conn->query($sql);
+$totalResult = $conn->query($totalSQL)->fetch_assoc();
+$totalPages = ceil($totalResult['total'] / $limit);
+
+// Fetch cars with pagination
+$carLimit = 10;
+$carPage = isset($_GET['car_page']) ? intval($_GET['car_page']) : 1;
+$carOffset = ($carPage - 1) * $carLimit;
+
+$carSearchQuery = "";
+if (isset($_GET['car_search']) && !empty($_GET['car_search'])) {
+    $carSearchQuery = $_GET['car_search'];
+    $carSql = "SELECT * FROM cars WHERE car_model LIKE '%$carSearchQuery%' OR license_plate LIKE '%$carSearchQuery%' LIMIT $carLimit OFFSET $carOffset";
+    $carTotalSQL = "SELECT COUNT(*) as total FROM cars WHERE car_model LIKE '%$carSearchQuery%' OR license_plate LIKE '%$carSearchQuery%'";
+} else {
+    $carSql = "SELECT * FROM cars LIMIT $carLimit OFFSET $carOffset";
+    $carTotalSQL = "SELECT COUNT(*) as total FROM cars";
+}
+
+$carResult = $conn->query($carSql);
+$carTotalResult = $conn->query($carTotalSQL)->fetch_assoc();
+$carTotalPages = ceil($carTotalResult['total'] / $carLimit);
+
+$conn->close();
 ?>
 
 <!DOCTYPE html>
@@ -68,165 +159,6 @@ $result = $conn->query($sql);
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin Dashboard - Disaster Relief</title>
-    <script src="https://maps.googleapis.com/maps/api/js?key=YOUR_GOOGLE_MAPS_API_KEY"></script>
-    <style>
-        /* General Reset */
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: Arial, sans-serif;
-            background-color: #f4f4f9;
-            color: #333;
-            line-height: 1.6;
-            display: flex;
-            margin: 0;
-            height: 100vh;
-        }
-
-        /* Sidebar Styling */
-        .sidebar {
-            width: 250px;
-            background-color: #333;
-            color: #fff;
-            height: 100vh;
-            padding: 20px;
-        }
-
-        .sidebar h2 {
-            color: #fff;
-            margin-bottom: 20px;
-        }
-
-        .sidebar a {
-            display: block;
-            color: #fff;
-            padding: 10px 0;
-            text-decoration: none;
-            transition: background-color 0.3s ease;
-        }
-
-        .sidebar a:hover {
-            background-color: #575757;
-        }
-
-        /* Main Content Styling */
-        main {
-            flex-grow: 1;
-            padding: 20px;
-            background-color: rgba(255, 255, 255, 0.9);
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-            margin: 0;
-        }
-
-        /* Heading Styling */
-        main h1 {
-            text-align: center;
-            margin-bottom: 1.5rem;
-            color: #333;
-        }
-
-        section {
-            margin-top: 1.5rem;
-        }
-
-        section h2 {
-            font-size: 1.5rem;
-            margin-bottom: 1rem;
-            color: #007bff;
-        }
-
-        /* Form Styling */
-        form label {
-            display: block;
-            margin-bottom: 0.5em;
-            font-weight: bold;
-            text-align: left;
-        }
-
-        form input[type="text"],
-        form input[type="password"],
-        form input[type="number"],
-        form input[type="search"] {
-            width: 100%;
-            padding: 0.8em;
-            margin-bottom: 1em;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            box-sizing: border-box;
-        }
-
-        form button {
-            padding: 0.8em 1.2em;
-            background-color: #007bff;
-            color: #ffffff;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 16px;
-            transition: background-color 0.3s ease;
-        }
-
-        form button:hover {
-            background-color: #0056b3;
-        }
-
-        /* Table Styling */
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 1rem;
-        }
-
-        table thead th {
-            background-color: #007bff;
-            color: #fff;
-            padding: 0.8rem;
-            text-align: left;
-        }
-
-        table tbody td {
-            padding: 0.8rem;
-            border: 1px solid #ddd;
-        }
-
-        table tbody tr:nth-child(even) {
-            background-color: #f9f9f9;
-        }
-
-        table tbody tr:hover {
-            background-color: #f1f1f1;
-        }
-
-        /* Map Styling */
-        .map-container {
-            width: 100%;
-            height: 400px;
-            margin-top: 20px;
-        }
-
-        /* Footer */
-        footer {
-            margin-top: 2em;
-            font-size: 14px;
-            color: #666;
-            text-align: center;
-        }
-
-        /* Responsive Design */
-        @media (max-width: 768px) {
-            body {
-                font-size: 14px;
-            }
-
-            main {
-                padding: 1rem;
-            }
-        }
-    </style>
 </head>
 <body>
     <div class="sidebar">
@@ -238,53 +170,105 @@ $result = $conn->query($sql);
         <a href="login.php">Logout</a>
     </div>
 
+    <main>
         <section>
-            <h2>Resource Map</h2>
-            <div id="map" class="map-container"></div>
+            <h2>Manage Resources</h2>
+            <!-- Resource Management Forms and Table as in the previous example -->
+
+            <h2>Manage Cars</h2>
+            <!-- Add Car Form -->
+            <form method="POST" action="">
+                <label for="car_model">Car Model:</label>
+                <input type="text" id="car_model" name="car_model" required>
+
+                <label for="license_plate">License Plate:</label>
+                <input type="text" id="license_plate" name="license_plate" required>
+
+                <label for="status">Status:</label>
+                <input type="text" id="status" name="status" required>
+
+                <button type="submit" name="add_car">Add Car</button>
+            </form>
+
+            <!-- Update Car Form -->
+            <form method="POST" action="">
+                <input type="hidden" name="id" id="car_id">
+                <label for="car_model">Car Model:</label>
+                <input type="text" id="car_model" name="car_model" required>
+
+                <label for="license_plate">License Plate:</label>
+                <input type="text" id="license_plate" name="license_plate" required>
+
+                <label for="status">Status:</label>
+                <input type="text" id="status" name="status" required>
+
+                <button type="submit" name="update_car">Update Car</button>
+            </form>
+
+            <!-- Delete Car -->
+            <form method="GET" action="">
+                <input type="hidden" name="delete_car" id="car_delete_id">
+                <button type="submit" id="car_delete_button">Delete Car</button>
+            </form>
+
+            <!-- Car Search and Table -->
+            <form method="GET" action="">
+                <input type="text" name="car_search" placeholder="Search cars..." value="<?php echo htmlspecialchars($carSearchQuery); ?>">
+                <button type="submit">Search</button>
+            </form>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>Car Model</th>
+                        <th>License Plate</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php if ($carResult && $carResult->num_rows > 0): ?>
+                        <?php while ($carRow = $carResult->fetch_assoc()): ?>
+                            <tr>
+                                <td><?php echo htmlspecialchars($carRow['car_model']); ?></td>
+                                <td><?php echo htmlspecialchars($carRow['license_plate']); ?></td>
+                                <td><?php echo htmlspecialchars($carRow['status']); ?></td>
+                                <td>
+                                    <button type="button" onclick="populateCarUpdateForm(<?php echo $carRow['id']; ?>)">Edit</button>
+                                    <button type="button" onclick="populateCarDeleteForm(<?php echo $carRow['id']; ?>)">Delete</button>
+                                </td>
+                            </tr>
+                        <?php endwhile; ?>
+                    <?php else: ?>
+                        <tr><td colspan="4">No cars found</td></tr>
+                    <?php endif; ?>
+                </tbody>
+            </table>
+
+            <!-- Car Pagination -->
+            <div class="pagination">
+                <?php if ($carPage > 1): ?>
+                    <a href="?car_page=<?php echo $carPage - 1; ?>&car_search=<?php echo htmlspecialchars($carSearchQuery); ?>">Previous</a>
+                <?php endif; ?>
+                <span>Page <?php echo $carPage; ?> of <?php echo $carTotalPages; ?></span>
+                <?php if ($carPage < $carTotalPages): ?>
+                    <a href="?car_page=<?php echo $carPage + 1; ?>&car_search=<?php echo htmlspecialchars($carSearchQuery); ?>">Next</a>
+                <?php endif; ?>
+            </div>
         </section>
     </main>
 
     <script>
-        function initMap() {
-            const map = new google.maps.Map(document.getElementById("map"), {
-                center: { lat: 10.3157, lng: 123.8854 }, // Default location (Cebu, Philippines)
-                zoom: 8,
-            });
-
-            const resources = <?php
-                $resourcesArray = [];
-                if ($result && $result->num_rows > 0) {
-                    $result->data_seek(0);
-                    while ($row = $result->fetch_assoc()) {
-                        $resourcesArray[] = [
-                            "resource" => $row["resource"],
-                            "location" => $row["location"],
-                        ];
-                    }
-                }
-                echo json_encode($resourcesArray);
-            ?>;
-
-            resources.forEach((resource) => {
-                const geocoder = new google.maps.Geocoder();
-                geocoder.geocode({ address: resource.location }, (results, status) => {
-                    if (status === "OK") {
-                        new google.maps.Marker({
-                            position: results[0].geometry.location,
-                            map: map,
-                            title: resource.resource,
-                        });
-                    }
-                });
-            });
+        function populateCarUpdateForm(id) {
+            document.getElementById('car_id').value = id;
+            // Fetch car data via AJAX and populate form fields
         }
 
-        window.onload = initMap;
+        function populateCarDeleteForm(id) {
+            document.getElementById('car_delete_id').value = id;
+            document.getElementById('car_delete_button').click();
+        }
     </script>
+
 </body>
 </html>
-
-<?php
-// Close the database connection
-$conn->close();
-?>
